@@ -88,7 +88,7 @@ func startPush() {
 				keyframe = true
 				break
 			}
-			fmt.Println(h264.NALUTypeString(h264.NALUType(nalu)))
+			//fmt.Println("client ",h264.NALUTypeString(h264.NALUType(nalu)))
 		}
 
 		duration := time.Since(start)
@@ -102,7 +102,7 @@ func startPush() {
 		}
 
 		c.WritePacket(pkt)
-		fmt.Println(pkt)
+		//fmt.Println("client ",pkt)
 	}
 
 	pipeline.SetState(gst.StateNull)
@@ -144,12 +144,13 @@ func startRtmp() {
 			switch pkt.Type {
 			case av.H264DecoderConfig:
 				pub.videoSeq = pkt
+				fmt.Println("server  sps  pps ========")
 			case av.H264:
-				fmt.Println("Write video ", pkt.Time)
+				fmt.Println("server ", pkt.Time)
 			case av.AACDecoderConfig:
 				pub.audioSeq = pkt
 			case av.AAC:
-				fmt.Println("Write audio ", pkt.Time)
+				fmt.Println("server ", pkt.Time)
 			}
 		}
 	}
