@@ -40,14 +40,19 @@ func startPush() {
 	rtmpClient := rtmp.NewClient()
 
 	var c *rtmp.Conn
-	var nc net.Conn
-	c, nc, err = rtmpClient.Dial("rtmp://localhost/live/live", rtmp.PrepareWriting)
+	c, _, err = rtmpClient.Dial("rtmp://localhost/live/live", rtmp.PrepareWriting)
 
 	if err != nil {
 		panic(err)
 	}
 
 	h264Codec := h264.NewCodec()
+	decodeConfig := av.Packet{
+		Type:       av.H264DecoderConfig,
+		IsKeyFrame: true,
+	}
+
+	start := time.Now()
 
 	for {
 		sample, err := element.PullSample()
@@ -62,7 +67,8 @@ func startPush() {
 		}
 
 		nalus, _ := h264.SplitNALUs(sample.Data)
-
+		nalus_ := make([][]byte, 0)
+		keyframe := false
 		for _, nalu := range nalus {
 			typ := h264.NALUType(nalu)
 			switch typ {
@@ -70,14 +76,33 @@ func startPush() {
 				h264Codec.AddSPSPPS(nalu)
 			case h264.NALU_PPS:
 				h264Codec.AddSPSPPS(nalu)
+				decodeConfig.Data = make([]byte, 2048)
+				var len int
+				h264Codec.ToConfig(decodeConfig.Data, &len)
+				decodeConfig.Data = decodeConfig.Data[0:len]
+				c.WritePacket(decodeConfig)
 			case h264.NALU_IDR:
-
+				nalus_ = append(nalus_, nalu)
 			case h264.NALU_NONIDR:
+				nalus_ = append(nalus_, nalu)
+				keyframe = true
 				break
 			}
 			fmt.Println(h264.NALUTypeString(h264.NALUType(nalu)))
 		}
-		fmt.Println("got sample", sample.Duration, len(nalus), typ)
+
+		duration := time.Since(start)
+		data := h264.FillNALUsAVCC(nalus_)
+		pkt := av.Packet{
+			Type: av.H264,
+			IsKeyFrame:keyframe,
+			Time: duration,
+			CTime: duration,
+			Data: data,
+		}
+
+		c.WritePacket(pkt)
+		fmt.Println(pkt)
 	}
 
 	pipeline.SetState(gst.StateNull)
@@ -140,6 +165,11 @@ func startRtmp() {
 }
 
 func main() {
+
+	go startRtmp()
+
+	// sleep for a while
+	time.Sleep(time.Second)
 
 	startPush()
 }
