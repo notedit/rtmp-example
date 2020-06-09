@@ -13,7 +13,6 @@ var lock sync.RWMutex
 var streams = map[string]*pubsub.PubSub{}
 
 
-
 func startRtmp() {
 
 	lis, err := net.Listen("tcp", ":1935")
@@ -34,11 +33,19 @@ func startRtmp() {
 
 		if c.Publishing {
 			pubsuber := &pubsub.PubSub{}
+
+			lock.Lock()
 			streams[c.URL.Path] = pubsuber
+			lock.Unlock()
+
 			pubsuber.SetPub(c)
 			delete(streams,c.URL.Path)
 		} else {
+
+			lock.Lock()
 			pubsuber := streams[c.URL.Path]
+			lock.Unlock()
+
 			if pubsuber != nil {
 				pubsuber.AddSub(c.CloseNotify(),c)
 			} else {
@@ -58,6 +65,6 @@ func startRtmp() {
 }
 
 func main() {
-	
+
 	startRtmp()
 }

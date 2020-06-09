@@ -5,8 +5,10 @@ import (
 	"github.com/notedit/rtmp/av"
 	"github.com/notedit/rtmp/format/flv"
 	"github.com/notedit/rtmp/format/rtmp"
+	"github.com/notedit/rtmp/pubsub"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 )
 
@@ -21,6 +23,12 @@ var flvmuxer *flv.Muxer
 
 var writeVideoSeq bool
 var writeAudioSeq bool
+
+
+
+var lock sync.RWMutex
+var streams = map[string]*pubsub.PubSub{}
+
 
 
 func startRtmp() {
@@ -41,46 +49,25 @@ func startRtmp() {
 
 		fmt.Println(c.URL.Path)
 
-		if !c.Publishing {
-			return
-		}
+		if c.Publishing {
+			pubsuber := &pubsub.PubSub{}
 
-		pub := &stream{}
-		pub.conn = c
+			lock.Lock()
+			streams[c.URL.Path] = pubsuber
+			lock.Unlock()
 
-		for {
-			pkt, err := c.ReadPacket()
-			if err != nil {
-				return
-			}
-			switch pkt.Type {
-			case av.H264DecoderConfig:
-				pub.videoSeq = pkt
-			case av.H264:
-				if !writeVideoSeq {
-					if pkt.IsKeyFrame && flvmuxer !=nil {
-						writeVideoSeq = true
-						flvmuxer.WritePacket(pub.videoSeq)
-						flvmuxer.WritePacket(pkt)
-					} else {
-						continue
-					}
-				} else {
-					flvmuxer.WritePacket(pkt)
-					fmt.Println("Write video ")
-				}
-			case av.AACDecoderConfig:
-				pub.audioSeq = pkt
-			case av.AAC:
-				if !writeAudioSeq {
-					if flvmuxer !=nil {
-						writeAudioSeq = true
-						flvmuxer.WritePacket(pub.audioSeq)
-					}
-				} else {
-					flvmuxer.WritePacket(pkt)
-					fmt.Println("Write audio ")
-				}
+			pubsuber.SetPub(c)
+			delete(streams,c.URL.Path)
+		} else {
+
+			lock.Lock()
+			pubsuber := streams[c.URL.Path]
+			lock.Unlock()
+
+			if pubsuber != nil {
+				pubsuber.AddSub(c.CloseNotify(),c)
+			} else {
+				nc.Close()
 			}
 		}
 	}
@@ -95,17 +82,28 @@ func startRtmp() {
 	}
 }
 
+
+
 func main() {
 
-	http.HandleFunc("/live", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/live/live", func(w http.ResponseWriter, r *http.Request) {
 
 		w.Header().Set("Content-Type", "video/x-flv")
-		w.Header().Set("Transfer-Encoding", "chunked")
+		//w.Header().Set("Transfer-Encoding", "chunked")
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.WriteHeader(200)
 
 		flusher := w.(http.Flusher)
 		flusher.Flush()
+
+
+		lock.Lock()
+		pubsuber := streams["/live/live"]
+		lock.Unlock()
+
+		if pubsuber == nil {
+			return
+		}
 
 		muxer := flv.NewMuxer(w)
 		muxer.HasAudio = true
@@ -113,10 +111,10 @@ func main() {
 		muxer.Publishing = true
 
 		muxer.WriteFileHeader()
-		flvmuxer = muxer
 
-		done := r.Context().Done()
-		<-done
+		close := make(chan bool,1)
+		pubsuber.AddSub(close, muxer)
+
 	})
 
 	go startRtmp()
