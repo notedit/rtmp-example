@@ -87,7 +87,6 @@ func startHttpServer() {
 
 			close := make(chan bool, 1)
 
-			fmt.Println("addsub")
 			pubsuber.AddSub(close, muxer)
 
 		}
